@@ -108,7 +108,7 @@ class BridgeTransformer(hk.Module):
         context = x[..., 52:60]
         history = x[..., 60:]
 
-        tokens = history.reshape(x.shape[0], 35, 12)
+        tokens = history.reshape(-1, 35, 12)
         tokens = hk.Linear(self.d_model)(tokens)
 
         pos_indices    = jnp.arange(35)
