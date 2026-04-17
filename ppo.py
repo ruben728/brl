@@ -129,7 +129,7 @@ class PPOConfig(BaseModel):
     # eval config
     num_eval_envs: int = 10000
     eval_opp_activation: str = "relu"
-    eval_opp_model_type: Literal["DeepMind", "FAIR"] = "DeepMind"
+    eval_opp_model_type: Literal["DeepMind", "FAIR", "Transformer"] = "DeepMind"
     eval_opp_model_path: str = None
     num_eval_step: int = 10
     # log config
@@ -144,12 +144,12 @@ class PPOConfig(BaseModel):
     load_initial_model: bool = False
     initial_model_path: str = None
     actor_activation: str = "relu"
-    actor_model_type: Literal["DeepMind", "FAIR"] = "DeepMind"
+    actor_model_type: Literal["DeepMind", "FAIR", "Transformer"] = "DeepMind"
     # opposite config
     game_mode: Literal["competitive", "free-run"] = "competitive"
     self_play: bool = True
     opp_activation: str = "relu"
-    opp_model_type: Literal["DeepMind", "FAIR"] = "DeepMind"
+    opp_model_type: Literal["DeepMind", "FAIR", "Transformer"] = "DeepMind"
     opp_model_path: str = None
     ratio_model_zoo: float = 0
     num_model_zoo: int = 100_000
