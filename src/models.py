@@ -110,7 +110,8 @@ class BridgeTransformer(hk.Module):
         context = x[..., 52:60]
         history = x[..., 60:]
 
-        tokens = history.reshape(*history.shape[:-1], 35, 12)
+        batch_shape = x.shape[:-1]   # (batch,) or () if unbatched
+        tokens = history.reshape(*batch_shape, 35, 12)
         tokens = hk.Linear(self.d_model)(tokens)
 
         pos_indices    = jnp.arange(35)
