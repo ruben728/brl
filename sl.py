@@ -30,7 +30,7 @@ import optax
 
 import pyspiel
 import wandb
-from src.models import ActorCritic
+from src.models import make_forward_pass
 import distrax
 from omegaconf import OmegaConf
 from pydantic import BaseModel
@@ -77,8 +77,9 @@ class SLConfig(BaseModel):
     eval_batch: int = 10000
     rng_seed: int = 42
     entropy_coef: float = 0
-    type_of_model: Literal["DeepMind", "FAIR"] = "DeepMind"
+    type_of_model: Literal["DeepMind", "FAIR", "Transformer"] = "DeepMind"
     activation: str = "relu"
+    track: bool = False    # ← add this
 
 
 args = SLConfig(**OmegaConf.to_object(OmegaConf.from_cli()))
@@ -137,28 +138,40 @@ def one_hot(x, k):
     return jnp.array(x[..., jnp.newaxis] == jnp.arange(k), dtype=np.float32)
 
 
+# REPLACE with this:
 def actor_critic_net_fn(x):
-    net = ActorCritic(
-        action_dim=38, activation=args.activation, model=args.type_of_model
-    )
+    from src.models import BridgeTransformer, ActorCritic
+    if args.type_of_model == "Transformer":
+        net = BridgeTransformer(
+            action_dim=38,
+            d_model=256,
+            num_heads=8,
+            num_layers=3,
+        )
+    else:
+        net = ActorCritic(
+            action_dim=38,
+            activation=args.activation,
+            model=args.type_of_model,
+        )
     logits, value = net(x)
     return logits
 
 
 def main():
-    wandb.init(
-        project="wbride5_learning",
-        config={
-            "ITERATIONS": args.iterations,
-            "TRAIN_BATCH": args.train_batch,
-            "lr": args.learning_rate,
-            "type_of_model": args.type_of_model,
-            "activation": args.activation,
-            "entropy_coef": args.entropy_coef,
-        },
-    )
-    config = wandb.config
-    print(config)
+    if args.track:
+        wandb.init(
+            project="wbride5_learning",
+            config={
+                "ITERATIONS": args.iterations,
+                "TRAIN_BATCH": args.train_batch,
+                "lr": args.learning_rate,
+                "type_of_model": args.type_of_model,
+                "activation": args.activation,
+                "entropy_coef": args.entropy_coef,
+            },
+        )
+    print(args)
 
     # Make the network.
     net = hk.without_apply_rng(hk.transform(actor_critic_net_fn))
@@ -270,7 +283,6 @@ def main():
 
     # Train/eval loop.
     for step in range(args.iterations):
-        # Do SGD on a batch of training examples.
         inputs, targets, legal_actions = next(train)
         params, opt_state, train_loss = update(
             params, opt_state, inputs, targets, legal_actions
@@ -284,7 +296,6 @@ def main():
             "train/train_accuracy": train_accuracy,
         }
 
-        # Periodically evaluate classification accuracy on the test set.
         if (1 + step) % args.eval_every == 0:
             inputs, targets, legal_actions = next(test)
             test_accuracy = accuracy(params, inputs, targets)
@@ -306,9 +317,21 @@ def main():
                 with open(filename, "wb") as pkl_file:
                     pickle.dump(params, pkl_file)
             output_samples(params, args.num_examples)
-            wandb.log({**test_metrics})
-        wandb.log({**metrics})
-    wandb.finish()
+            if args.track:
+                wandb.log({**test_metrics})
+        if args.track:
+            wandb.log({**metrics})
+
+    # Save final model after training completes
+    if args.save_path is not None:
+        os.makedirs(args.save_path, exist_ok=True)
+        filename = os.path.join(args.save_path, "model_final.pkl")
+        with open(filename, "wb") as pkl_file:
+            pickle.dump(params, pkl_file)
+        print(f"Final model saved to {filename}")
+
+    if args.track:
+        wandb.finish()
 
 
 if __name__ == "__main__":
