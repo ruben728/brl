@@ -110,7 +110,7 @@ class BridgeTransformer(hk.Module):
         context = x[..., 52:60]
         history = x[..., 60:]
 
-        tokens = history.reshape(-1, 35, 12)
+        tokens = history.reshape(*history.shape[:-1], 35, 12)
         tokens = hk.Linear(self.d_model)(tokens)
 
         pos_indices    = jnp.arange(35)
@@ -120,7 +120,7 @@ class BridgeTransformer(hk.Module):
         for i in range(self.num_layers):
             tokens = self._attention_block(tokens, layer_idx=i)
 
-        seq_repr = jnp.mean(tokens, axis=1)
+        seq_repr = jnp.mean(tokens, axis=-2)
         combined = jnp.concatenate([seq_repr, hand, context], axis=-1)
         combined = hk.Linear(self.d_model)(combined)
         combined = jax.nn.relu(combined)
