@@ -104,6 +104,7 @@ class BridgeTransformer(hk.Module):
         return x
     
     def __call__(self, x):
+        x = x.astype(jnp.float32)
         hand    = x[..., :52]
         context = x[..., 52:60]
         history = x[..., 60:]
