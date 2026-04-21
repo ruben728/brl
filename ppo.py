@@ -263,8 +263,8 @@ def train(config, rng):
         eval_env=eval_env,
         team1_activation=config["actor_activation"],
         team1_model_type=config["actor_model_type"],
-        team2_activation=config["actor_activation"],
-        team2_model_type=config["actor_model_type"],
+        team2_activation=config["eval_opp_activation"],          # ← changed
+        team2_model_type=config["eval_opp_model_type"],          # ← changed
         num_eval_envs=config["num_prioritized_envs"],
     )
     duplicate_evaluate = make_evaluate(
