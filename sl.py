@@ -139,23 +139,23 @@ def one_hot(x, k):
 
 
 # REPLACE with this:
-def actor_critic_net_fn(x):
-    from src.models import BridgeTransformer, ActorCritic
-    if args.type_of_model == "Transformer":
-        net = BridgeTransformer(
-            action_dim=38,
-            d_model=256,
-            num_heads=8,
-            num_layers=3,
-        )
-    else:
-        net = ActorCritic(
-            action_dim=38,
-            activation=args.activation,
-            model=args.type_of_model,
-        )
-    logits, value = net(x)
-    return logits
+# def actor_critic_net_fn(x):
+#     from src.models import BridgeTransformer, ActorCritic
+#     if args.type_of_model == "Transformer":
+#         net = BridgeTransformer(
+#             action_dim=38,
+#             d_model=256,
+#             num_heads=8,
+#             num_layers=3,
+#         )
+#     else:
+#         net = ActorCritic(
+#             action_dim=38,
+#             activation=args.activation,
+#             model=args.type_of_model,
+#         )
+#     logits, value = net(x)
+#     return logits
 
 
 def main():
@@ -174,7 +174,8 @@ def main():
     print(args)
 
     # Make the network.
-    net = hk.without_apply_rng(hk.transform(actor_critic_net_fn))
+    #CHANGE HERE
+    net = make_forward_pass(activation=args.activation, model_type=args.type_of_model)
     # Make the optimiser.
     opt = optax.adam(args.learning_rate)
 
@@ -187,7 +188,7 @@ def main():
     ):
         """Cross-entropy loss."""
         assert targets.dtype == np.int32
-        logits = net.apply(params, inputs)
+        logits, _ = net.apply(params, inputs)
         log_probs = jax.nn.log_softmax(logits)
         target_loss = -jnp.mean(one_hot(targets, NUM_ACTIONS) * log_probs)
         masked_logits = logits + jnp.finfo(np.float64).min * (~legal_actions)
@@ -203,7 +204,8 @@ def main():
         targets: np.ndarray,
     ) -> jax.Array:
         """Classification accuracy."""
-        predictions = jax.nn.softmax(net.apply(params, inputs))
+        logits, _ = net.apply(params, inputs)  # ← unpack tuple
+        predictions = jax.nn.softmax(logits)
         return jnp.mean(jnp.argmax(predictions, axis=-1) == targets)
 
     @jax.jit
@@ -238,7 +240,9 @@ def main():
                         state.observation_tensor()[4:484], np.float32
                     )
                     # policy = np.exp(net.apply(params, observation))
-                    policy = jax.nn.softmax(net.apply(params, observation))
+                    #CHANGE HERE
+                    logits, _ = net.apply(params, observation)
+                    policy = jax.nn.softmax(logits)
                     probs_actions = [(p, a + MIN_ACTION) for a, p in enumerate(policy)]
                     pred = max(probs_actions)[1]
                     if pred != action:
@@ -301,7 +305,9 @@ def main():
             test_accuracy = accuracy(params, inputs, targets)
             test_loss = loss(params, inputs, targets, legal_actions)
             total_loss, (target_loss, entropy) = test_loss
-            pi = jax.nn.softmax(net.apply(params, inputs))
+            #Change HERE
+            logits, _ = net.apply(params, inputs)
+            pi = jax.nn.softmax(logits)
             illegal_action_prob = jax.vmap(jnp.dot)(pi, ~legal_actions)
             print(f"After {1+step} steps, test accuracy: {test_accuracy}.")
             test_metrics = {
