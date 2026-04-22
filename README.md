@@ -1,127 +1,304 @@
-# brl
-reinforcement learning for bridge
+# Bridge Bidding RL — Transformer Architecture
+
+This repository is a fork of [harukaki/brl](https://github.com/harukaki/brl), extending the bridge bidding reinforcement learning framework from Kita et al. (2024) with a **Transformer encoder architecture** as an alternative to the original MLP.
+
+## What This Fork Adds
+
+- `BridgeTransformer` — a 3-layer Transformer encoder (d_model=256, 8 heads, 2.47M params) in `src/models.py`, replacing the flat MLP for the policy/value network
+- Updated `sl.py` to support `type_of_model=Transformer` for supervised learning warm-start
+- Updated `ppo.py` to support `actor_model_type=Transformer` for RL training
+- Compatibility fixes for `pgx==2.4.0` and `jax==0.4.35` (newer versions than the original repo)
+- Pre-trained SL warm-start models: `sl_model_deepmind/model_final.pkl` and `sl_model_transformer/model_final.pkl`
+
+## Architecture Overview
+
+The `BridgeTransformer` treats the 480-dimensional observation as two components:
+- **Sequential:** the 420-bit bidding history is reshaped into 35 tokens × 12 features, processed by a Transformer encoder with learned positional embeddings
+- **Global:** the 52-bit hand and 8-bit context (vulnerability) are concatenated after pooling
+
+This is motivated by the fact that bridge bidding is inherently relational — the meaning of any bid depends on its relationship to all other bids in the auction, which self-attention captures more expressively than fixed MLP weights.
+
+---
 
 ## Installation
-Please install the necessary packages according to the `requirements.txt`.  
-Note that you need to install the appropriate versions of jax and jaxlib according to your execution environment.  
-Additionally, we are using pgx as the environment for bridge, and currently, we support version 1.4.0 of [pgx](https://github.com/sotetsuk/pgx). 
+
+> ⚠️ **Do not run `pip install -r requirements.txt` directly.** JAX requires a separate installation with CUDA support. Follow the steps below exactly.
+
+### Step 1 — Install JAX with GPU support
+
+```bash
+pip uninstall jax jaxlib jax-cuda12-plugin -y
+pip install "jax[cuda12]==0.4.35" \
+  -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+```
+
+### Step 2 — Install remaining dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
-For bridge bidding in pgx, downloading the Double Dummy Solver (DDS) dataset is required. Please download the DDS dataset according to [pgx bridge bidding documentation](https://github.com/sotetsuk/pgx/blob/main/docs/bridge_bidding.md).
-```py
+
+### Step 3 — Verify GPU is detected
+
+```python
+import jax
+print(jax.__version__)   # should be 0.4.35
+print(jax.devices())     # should show CudaDevice, not CpuDevice
+```
+
+### Step 4 — Download DDS dataset
+
+```python
 from pgx.bridge_bidding import download_dds_results
 download_dds_results()
 ```
 
-## Pre-trained models
-Parameters trained by this repository are published. 
-| Model                             | Description                                     | Score against wbridge5 |
-|-----------------------------------|-------------------------------------------------|------------------------|
-| model-sl.pkl                      | Supervised Learning from wbridge5               | -0.56 IMPs/b           |
-| model-from-scrach-rl.pkl          | Reinforcement Learning from scrach              | -0.64 IMPs/b           |
-| model-pretrained-rl.pkl           | RL after SL pretraining                         |  0.88 IMPs/b           |
-| model-pretrained-rl-with-fsp.pkl  | RL after SL pretraining with FSP                |  1.24 IMPs/b           |
-| model-pretrained-rl-with-pfsp.pkl | RL after SL pretraining with mix of SP and PFSP |  0.89 IMPs/b           |
-
-For more details on each training, please refer to [`bridge_models/README`](https://github.com/harukaki/brl/tree/main/bridge_models).
-## Evaluation models
-To evaluate pre-trained models against each other, please use the following command:  
-Example
-```bash
-python eval.py team1_model_path=bridge_models/model-pretrained-rl.pkl \
-  team2_model_path=bridge_models/model-sl.pkl num_eval_envs=100
-```
-
-Here's an example of the output:
-```
-Loading dds results from dds_results/test_000.npy ...
-num envs: 100
----------------------------------------------------
-bridge_models/model-pretrained-rl.pkl vs. bridge_models/model-pretrained-rl.pkl
-IMP: 0.47999998927116394 ± 0.5320970416069031
-```
-
-## Supervised Learning from Wbridge5 datasets
-Please download the "train.txt" and "test.txt" files, which are part of the dataset published by Openspiel, from the specified URL.  
-After downloading, place these files in your `your_data_directory`.  
-https://github.com/google-deepmind/open_spiel/blob/master/open_spiel/python/examples/bridge_supervised_learning.py
-
-Example  
-
-Run supervised learning
-```bash
-python sl.py iterations=400000 train_batch=128 learning_rate=0.0001 \
-  eval_every=10000 data_path=your_data_directory save_path=your_model_directory
-```
-
-
-## Reinforcement Learning
-Please prepare a baseline model for evaluation and enter its file path in `eval_opp_model_path`.  
-For instance, the pre-trained model provided through supervised learning.  
-
-Examples  
-  
-Run reinforcement learning without loading initial model.
+Then create the required symlinks:
 
 ```bash
-python ppo.py num_envs=8192 num_steps=32 minibatch_size=1024 \
-  total_timesteps=5242880000 update_epochs=10 lr=0.00001 gamma=1 gae_lambda=0.95 ent_coef=0.001 \
-  VE_COEF=0.5 num_eval_envs=100 eval_opp_model_path="bridge_models/model-sl.pkl" num_eval_step=10 \
-  load_initial_model=False log_path="rl_log" exp_name=exp0000 save_model=True save_model_interval=100
+ln -sf $(pwd)/dds_results/dds_results_500K.npy dds_results/test_000.npy
+ln -sf $(pwd)/dds_results/dds_results_10M.npy dds_results/dds_results_train_000.npy
+ln -sf $(pwd)/dds_results/dds_results_2.5M.npy dds_results/dds_results_train_001.npy
 ```
 
-Run reinforcement learning with loading initial model.  
-Please prepare a initial model for the neural network and enter its file path in `initial_model_path`.  
-For instance, the pre-trained model provided through supervised learning. 
+### Step 5 — Download supervised learning data
 
 ```bash
-python ppo.py num_envs=8192 num_steps=32 minibatch_size=1024 \
-  total_timesteps=2621440000 update_epochs=10 lr=0.000001 gamma=1 gae_lambda=0.95 ent_coef=0.001 \
-  VE_COEF=0.5 num_eval_envs=100 eval_opp_model_path="bridge_models/model-sl.pkl" num_eval_step=10 \
-  load_initial_model=True initial_model_path="bridge_models/model-sl.pkl" \
-  log_path="rl_log" exp_name=exp0001 save_model=True save_model_interval=100
+mkdir -p bridge_data
+gsutil -m cp gs://openspiel-data/bridge/train.txt bridge_data/
+gsutil -m cp gs://openspiel-data/bridge/test.txt bridge_data/
 ```
 
-## Evaluation with wbridge5
-You can use the  [`bridge_env`](https://github.com/yotaroy/bridge_env) submodule to play a network match against the rule-based bridge AI, [Wbridge5](http://www.wbridge5.com/), on localhost. Please note that Wbridge5 only runs on Windows.
+---
 
-Install the `bridge_env` submodule
+## Pre-trained SL Warm-Start Models
+
+This fork includes pre-trained supervised learning warm-start models trained on the OpenSpiel bridge dataset. These are required before running RL training.
+
+| File | Architecture | Purpose |
+|------|-------------|---------|
+| `sl_model_transformer/model_final.pkl` | BridgeTransformer (2.47M params) | Warm-start for Transformer RL training |
+| `sl_model_deepmind/model_final.pkl` | DeepMind MLP (3.7M params) | Warm-start for MLP RL training + opponent model |
+
+> **Note:** These models were trained with `jax==0.4.35` and `dm-haiku==0.0.16`. They are **not compatible** with the original Kita et al. pkl files which were saved with older JAX versions.
+
+---
+
+## Training
+
+### Recommended parameters
+
+The following parameters are calibrated for a single A100/H100 GPU (~2-3 hours) while producing meaningful results for architectural comparison:
+
+| Parameter | Value | Justification |
+|-----------|-------|---------------|
+| `num_envs` | 1024 | 8x fewer than paper's 8192; still sufficient parallelism |
+| `num_steps` | 32 | Same as paper |
+| `total_timesteps` | 200000000 | 10% of paper; enough to show clear learning trends |
+| `update_epochs` | 10 | Same as paper |
+| `minibatch_size` | 512 | Halved to match reduced num_envs |
+| `lr` | 0.000001 | Same as paper |
+
+### Train Transformer (main experiment)
+
 ```bash
-git submodule update --init --recursive
-cd submodule/bridge_env
-python setup.py install
-cd ../
-```
-Execute a network match (duplicate board) between a trained model and Wbridge5.  
-Example
-```bash
-bash eval_wb5.sh bridge_models/model-sl.pkl relu DeepMind log_wb5 2000 2001
-```
-In the example above, you can connect to the first table on port 2000 and the second table on port 2001 on localhost.  
+mkdir -p rl_log/transformer_full/rl_params
 
-Launch Wbridge5, set "localhost" as the server, connect the positions of "N" and "S" to the first port, and connect the positions of "E" and "W" to the second port.  
-
-Analyze the IMPs/b performance against Wbridge5 from the results of the duplicate match.  
-Example
-```bash
-python -m wb5.analyze_log table1_results_path="log_wb5/board_log/table1_board_0000.json" \
-  table2_results_path="log_wb5/board_log/table2_board_0000.json" tag="model"
+XLA_PYTHON_CLIENT_PREALLOCATE=false python ppo.py \
+  actor_model_type=Transformer \
+  self_play=False \
+  opp_model_type=DeepMind \
+  opp_model_path="sl_model_deepmind/model_final.pkl" \
+  num_envs=1024 \
+  num_steps=32 \
+  total_timesteps=200000000 \
+  update_epochs=10 \
+  minibatch_size=512 \
+  lr=0.000001 \
+  gamma=1 \
+  gae_lambda=0.95 \
+  ent_coef=0.001 \
+  VE_COEF=0.5 \
+  load_initial_model=True \
+  initial_model_path="sl_model_transformer/model_final.pkl" \
+  eval_opp_model_path="sl_model_deepmind/model_final.pkl" \
+  eval_opp_model_type=DeepMind \
+  num_eval_envs=100 \
+  num_eval_step=10 \
+  save_model=True \
+  save_model_interval=50 \
+  track=False \
+  log_path="rl_log" \
+  exp_name="transformer_full"
 ```
+
+### Train DeepMind MLP baseline (for comparison)
+
+```bash
+mkdir -p rl_log/mlp_full/rl_params
+
+XLA_PYTHON_CLIENT_PREALLOCATE=false python ppo.py \
+  actor_model_type=DeepMind \
+  self_play=False \
+  opp_model_type=DeepMind \
+  opp_model_path="sl_model_deepmind/model_final.pkl" \
+  num_envs=1024 \
+  num_steps=32 \
+  total_timesteps=200000000 \
+  update_epochs=10 \
+  minibatch_size=512 \
+  lr=0.000001 \
+  gamma=1 \
+  gae_lambda=0.95 \
+  ent_coef=0.001 \
+  VE_COEF=0.5 \
+  load_initial_model=True \
+  initial_model_path="sl_model_deepmind/model_final.pkl" \
+  eval_opp_model_path="sl_model_deepmind/model_final.pkl" \
+  eval_opp_model_type=DeepMind \
+  num_eval_envs=100 \
+  num_eval_step=10 \
+  save_model=True \
+  save_model_interval=50 \
+  track=False \
+  log_path="rl_log" \
+  exp_name="mlp_full"
+```
+
+> **Tip for long runs:** use `tmux` so training survives SSH disconnection:
+> ```bash
+> tmux new -s training
+> # run training command
+> # detach with Ctrl+B then D
+> # reconnect with: tmux attach -t training
+> ```
+
+---
+
+## Supervised Learning (optional — pre-trained models already included)
+
+Only needed if you want to retrain the SL warm-starts from scratch.
+
+### Train SL warm-start for Transformer
+
+```bash
+python sl.py \
+  iterations=100000 \
+  train_batch=128 \
+  learning_rate=0.0001 \
+  eval_every=10000 \
+  data_path="bridge_data" \
+  save_path="sl_model_transformer" \
+  type_of_model=Transformer \
+  track=False
+```
+
+### Train SL warm-start for DeepMind MLP
+
+```bash
+python sl.py \
+  iterations=100000 \
+  train_batch=128 \
+  learning_rate=0.0001 \
+  eval_every=10000 \
+  data_path="bridge_data" \
+  save_path="sl_model_deepmind" \
+  type_of_model=DeepMind \
+  track=False
+```
+
+---
+
+## Evaluation
+
+Compare two trained models head-to-head:
+
+```bash
+python eval.py \
+  team1_model_path="rl_log/transformer_full/rl_params/params-XXXXX.pkl" \
+  team2_model_path="rl_log/mlp_full/rl_params/params-XXXXX.pkl" \
+  team1_model_type=Transformer \
+  team2_model_type=DeepMind \
+  num_eval_envs=1000
+```
+
+Replace `params-XXXXX.pkl` with the latest checkpoint filename from each experiment folder.
+
+---
+
+## Google Colab Setup
+
+If running on Colab, add this before the installation steps:
+
+```python
+# Set runtime to GPU first: Runtime → Change runtime type → T4 GPU
+
+# Cell 0 — Install (run once, then restart runtime)
+!pip uninstall jax jaxlib jax-cuda12-plugin -y --quiet
+!pip install "jax[cuda12]==0.4.35" \
+  -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html --quiet
+!pip install -r requirements.txt --quiet
+print("Done — restart runtime now")
+```
+
+After restarting, run the DDS download and symlink steps, then proceed with training commands above using `!` prefix for shell commands.
+
+---
+
+## Repository Structure
+
+```
+brl/
+├── src/
+│   ├── models.py        # BridgeTransformer + ActorCritic (MLP) definitions
+│   ├── evaluation.py    # Evaluation functions
+│   ├── roll_out.py      # PPO rollout
+│   ├── update.py        # PPO update step
+│   ├── gae.py           # Generalised Advantage Estimation
+│   ├── duplicate.py     # Duplicate bridge scoring
+│   └── utils.py         # Environment wrappers
+├── sl.py                # Supervised learning training
+├── ppo.py               # PPO reinforcement learning training
+├── eval.py              # Model evaluation
+├── sl_model_deepmind/   # Pre-trained SL warm-start (DeepMind MLP)
+├── sl_model_transformer/ # Pre-trained SL warm-start (Transformer)
+├── requirements.txt
+└── README.md
+```
+
+---
+
+## Key Differences from Original Repo
+
+| | Original (harukaki/brl) | This Fork |
+|---|---|---|
+| Architecture | DeepMind MLP / FAIR MLP | + BridgeTransformer encoder |
+| JAX version | 0.4.23 | 0.4.35 |
+| pgx version | 1.4.0 | 2.4.0 |
+| SL training | Returns logits only | Returns (logits, value) via make_forward_pass |
+| Evaluation | Both teams use actor model type | Teams use their respective model types |
+| utils.py | Uses state._rng_key (removed in pgx 2.x) | Passes rng explicitly |
+
+---
 
 ## License
 
 Apache 2.0
 
-## Citation
+## Citations
 
-Please cite our paper if you use this repository for you research:
-
-```
+```bibtex
 @inproceedings{Kita2024,
-        title        = {{A Simple, Solid, and Reproducible Baseline for Bridge Bidding AI}},
-        author       = {Kita, Haruka and Koyamada, Sotetsu and Yamaguchi, Yotaro and Ishii, Shin},
-        year         = 2024,
-        booktitle    = {IEEE Conference on Games},
+  title  = {{A Simple, Solid, and Reproducible Baseline for Bridge Bidding AI}},
+  author = {Kita, Haruka and Koyamada, Sotetsu and Yamaguchi, Yotaro and Ishii, Shin},
+  year   = 2024,
+  booktitle = {IEEE Conference on Games},
+}
+
+@inproceedings{Gong2019,
+  title  = {Simple is Better: Training an End-to-end Contract Bridge Bidding Agent without Human Knowledge},
+  author = {Gong, Qucheng and Jiang, Tina and Tian, Yuandong},
+  year   = 2019,
+  booktitle = {Real-world Sequential Decision Making Workshop at ICML},
 }
 ```
